@@ -1,15 +1,22 @@
 import {
+  BOOST_ACCELERATION,
+  BOOST_DURATION_MS,
+  clampBoostedSpeed,
+  padUnderPoint,
+  type BoostPad,
+} from "./boost-pads.ts";
+import {
   nearestCoursePosition,
   nearestRoadPosition,
   pointAtProgress,
   type Course,
   type Vec2,
-} from "./course";
+} from "./course.ts";
 import {
   clampVehicleSpeed,
   isRoadPassable,
   type VehicleId,
-} from "./vehicles";
+} from "./vehicles.ts";
 
 export type DriveInput = Readonly<{
   accelerate: boolean;
@@ -34,6 +41,9 @@ type ReadyRace = Readonly<{
   blockedForMs: 0;
   blockedHits: 0;
   blockedHighway: null;
+  boostRemainingMs: 0;
+  boostPadId: null;
+  boostHits: 0;
 }>;
 
 type RunningRace = Readonly<{
@@ -46,6 +56,9 @@ type RunningRace = Readonly<{
   blockedForMs: number;
   blockedHits: number;
   blockedHighway: string | null;
+  boostRemainingMs: number;
+  boostPadId: string | null;
+  boostHits: number;
 }>;
 
 type FinishedRace = Readonly<{
@@ -58,6 +71,9 @@ type FinishedRace = Readonly<{
   blockedForMs: number;
   blockedHits: number;
   blockedHighway: string | null;
+  boostRemainingMs: number;
+  boostPadId: string | null;
+  boostHits: number;
 }>;
 
 export type RaceState = ReadyRace | RunningRace | FinishedRace;
@@ -91,6 +107,9 @@ export const createRace = (targetCourse: Course): RaceState => {
     blockedForMs: 0,
     blockedHits: 0,
     blockedHighway: null,
+    boostRemainingMs: 0,
+    boostPadId: null,
+    boostHits: 0,
   };
 };
 
@@ -100,12 +119,16 @@ const moveVehicle = (
   deltaSeconds: number,
   onRoad: boolean,
   vehicleId: VehicleId,
+  boosting: boolean,
 ): Vehicle => {
   let speed = vehicle.speed;
   const traction = onRoad ? 1 : 0.32;
 
   if (input.accelerate) {
     speed += 15 * traction * deltaSeconds;
+  }
+  if (boosting && speed > 0) {
+    speed += BOOST_ACCELERATION * traction * deltaSeconds;
   }
   if (input.brake) {
     speed += (speed > 0 ? -23 : -9 * traction) * deltaSeconds;
@@ -122,7 +145,9 @@ const moveVehicle = (
   speed -=
     Math.sign(speed) * Math.min(Math.abs(speed), speed * speed * 0.012 * deltaSeconds);
 
-  speed = clampVehicleSpeed(speed, vehicleId, MAX_REVERSE_SPEED);
+  speed = boosting
+    ? clampBoostedSpeed(speed, vehicleId, MAX_REVERSE_SPEED)
+    : clampVehicleSpeed(speed, vehicleId, MAX_REVERSE_SPEED);
   if (!onRoad) {
     speed = Math.min(MAX_OFFROAD_SPEED, speed);
   }
@@ -173,6 +198,7 @@ export const stepRace = (
   deltaSeconds: number,
   targetCourse: Course,
   vehicleId: VehicleId,
+  pads: readonly BoostPad[] = [],
 ): RaceState => {
   if (state.kind === "finished") {
     return state;
@@ -230,12 +256,18 @@ export const stepRace = (
       };
     }
   }
+  const decayedBoostMs = Math.max(
+    0,
+    (state.kind === "ready" ? 0 : state.boostRemainingMs) -
+      deltaSeconds * 1_000,
+  );
   let vehicle = moveVehicle(
     vehicleBeforeMove,
     input,
     stepSeconds,
     wasOnRoad,
     vehicleId,
+    decayedBoostMs > 0,
   );
   const proposedRoadAccess = roadAccessAt(
     targetCourse,
@@ -290,6 +322,20 @@ export const stepRace = (
   const elapsedMs =
     (state.kind === "ready" ? 0 : state.elapsedMs) + deltaSeconds * 1_000;
 
+  const previousPadId = state.kind === "ready" ? null : state.boostPadId;
+  const padUnderVehicle = padUnderPoint(pads, vehicle.position);
+  const enteredPad =
+    padUnderVehicle !== null &&
+    (padUnderVehicle.id !== previousPadId || decayedBoostMs <= 0);
+  const boostRemainingMs =
+    padUnderVehicle === null ? decayedBoostMs : BOOST_DURATION_MS;
+  const boostPadId =
+    boostRemainingMs > 0
+      ? (padUnderVehicle?.id ?? previousPadId)
+      : null;
+  const boostHits =
+    (state.kind === "ready" ? 0 : state.boostHits) + Number(enteredPad);
+
   let checkpointsPassed =
     state.kind === "ready" ? 0 : state.checkpointsPassed;
   const nextCheckpoint =
@@ -320,6 +366,9 @@ export const stepRace = (
       blockedForMs,
       blockedHits,
       blockedHighway,
+      boostRemainingMs,
+      boostPadId,
+      boostHits,
     };
   }
 
@@ -333,6 +382,9 @@ export const stepRace = (
     blockedForMs,
     blockedHits,
     blockedHighway,
+    boostRemainingMs,
+    boostPadId,
+    boostHits,
   };
 };
 
