@@ -6,12 +6,12 @@ import {
   buildOverpassQuery,
   prepareFixture,
   validateBbox,
-} from "./free-range";
+} from "./free-range.ts";
 import {
   PREPARED_FIXTURE_KEY,
   type Bbox,
   type FixtureData,
-} from "./fixture";
+} from "./fixture.ts";
 
 type SetupOptions = Readonly<{
   initialError: string;

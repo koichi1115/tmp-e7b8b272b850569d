@@ -1,5 +1,5 @@
 import fixtureData from "./data/neighborhood.json" with { type: "json" };
-import type { FixtureData } from "./fixture";
+import type { FixtureData } from "./fixture.ts";
 
 export type Vec2 = Readonly<{ x: number; y: number }>;
 

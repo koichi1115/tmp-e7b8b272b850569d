@@ -6,7 +6,7 @@ import type {
   FixtureLandArea,
   FixtureRoad,
   FixtureRoadPoint,
-} from "./fixture";
+} from "./fixture.ts";
 
 export const MAX_BBOX_AREA_M2 = 500_000;
 export const OVERPASS_ENDPOINT =
