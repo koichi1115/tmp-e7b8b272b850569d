@@ -1,9 +1,49 @@
-import { pointAtProgress, type Course, type Vec2 } from "./course";
-import type { RaceState } from "./race";
+import {
+  PAD_LENGTH_METERS,
+  PAD_WIDTH_METERS,
+  padFootprint,
+  type BoostPad,
+} from "./boost-pads.ts";
+import type { Walker } from "./build-mode.ts";
+import { pointAtProgress, type Course, type Vec2 } from "./course.ts";
+import type { RaceState } from "./race.ts";
 import {
   isRoadPassable,
   type VehicleDefinition,
-} from "./vehicles";
+} from "./vehicles.ts";
+
+export type BuildView = Readonly<{
+  walker: Walker;
+  placementValid: boolean;
+}>;
+
+export type SceneOptions = Readonly<{
+  pads: readonly BoostPad[];
+  boostPadId: string | null;
+  build: BuildView | null;
+}>;
+
+type EyeView = Readonly<{
+  kind: "race" | "build";
+  position: Vec2;
+  heading: number;
+}>;
+
+export const sceneEye = (
+  state: RaceState,
+  scene: SceneOptions,
+): EyeView =>
+  scene.build
+    ? {
+        kind: "build",
+        position: scene.build.walker.position,
+        heading: scene.build.walker.heading,
+      }
+    : {
+        kind: "race",
+        position: state.vehicle.position,
+        heading: state.vehicle.heading,
+      };
 
 type Vec3 = Readonly<{ x: number; y: number; z: number }>;
 type CameraPoint = Readonly<{ right: number; up: number; depth: number }>;
@@ -42,22 +82,28 @@ const normalize3 = (vector: Vec3): Vec3 => {
   };
 };
 
+const CAMERA_RIGS = {
+  race: { back: 20, eye: 12, ahead: 27, aim: 0.8 },
+  build: { back: 8, eye: 3.4, ahead: 16, aim: 0.6 },
+} as const;
+
 const makeCamera = (
-  state: RaceState,
+  view: EyeView,
   width: number,
   height: number,
 ): Camera => {
-  const heading = state.vehicle.heading;
+  const rig = CAMERA_RIGS[view.kind];
+  const heading = view.heading;
   const direction = { x: Math.cos(heading), y: Math.sin(heading) };
   const position = {
-    x: state.vehicle.position.x - direction.x * 20,
-    y: state.vehicle.position.y - direction.y * 20,
-    z: 12,
+    x: view.position.x - direction.x * rig.back,
+    y: view.position.y - direction.y * rig.back,
+    z: rig.eye,
   };
   const target = {
-    x: state.vehicle.position.x + direction.x * 27,
-    y: state.vehicle.position.y + direction.y * 27,
-    z: 0.8,
+    x: view.position.x + direction.x * rig.ahead,
+    y: view.position.y + direction.y * rig.ahead,
+    z: rig.aim,
   };
   const forward = normalize3({
     x: target.x - position.x,
@@ -276,16 +322,16 @@ const pushLineCommands = (
 const drawGround = (
   context: CanvasRenderingContext2D,
   camera: Camera,
-  state: RaceState,
+  view: EyeView,
 ): void => {
   const direction = {
-    x: Math.cos(state.vehicle.heading),
-    y: Math.sin(state.vehicle.heading),
+    x: Math.cos(view.heading),
+    y: Math.sin(view.heading),
   };
   const side = { x: -direction.y, y: direction.x };
   const point = (forward: number, across: number): Vec3 => ({
-    x: state.vehicle.position.x + direction.x * forward + side.x * across,
-    y: state.vehicle.position.y + direction.y * forward + side.y * across,
+    x: view.position.x + direction.x * forward + side.x * across,
+    y: view.position.y + direction.y * forward + side.y * across,
     z: 0,
   });
   const ground = polygonCommand(
@@ -432,7 +478,7 @@ const drawBuildings = (
   context: CanvasRenderingContext2D,
   camera: Camera,
   course: Course,
-  state: RaceState,
+  view: EyeView,
 ): void => {
   const commands: PolygonCommand[] = [];
   for (const building of course.buildings) {
@@ -443,8 +489,8 @@ const drawBuildings = (
     const count = Math.max(1, building.footprint.length);
     if (
       Math.hypot(
-        center.x / count - state.vehicle.position.x,
-        center.y / count - state.vehicle.position.y,
+        center.x / count - view.position.x,
+        center.y / count - view.position.y,
       ) > 210
     ) {
       continue;
@@ -555,6 +601,91 @@ const drawCourseMarks = (
   });
 };
 
+const drawBoostPads = (
+  context: CanvasRenderingContext2D,
+  camera: Camera,
+  scene: SceneOptions,
+): void => {
+  const commands: PolygonCommand[] = [];
+  for (const pad of scene.pads) {
+    const active = pad.id === scene.boostPadId;
+    const base = polygonCommand(
+      camera,
+      `pad:${pad.id}`,
+      padFootprint(pad).map((point) => ({ ...point, z: 0.21 })),
+      active ? "#7de3f3" : "#2fa8c9",
+      "#eafaff",
+    );
+    if (base) {
+      commands.push(base);
+    }
+    const along = { x: Math.cos(pad.heading), y: Math.sin(pad.heading) };
+    const across = { x: -along.y, y: along.x };
+    const chevronTip = 2.2;
+    const chevronThickness = 1.1;
+    const chevronSide = PAD_WIDTH_METERS / 2 - 1.3;
+    for (let index = 0; index < 2; index += 1) {
+      const offset = (index - 0.5) * 2.4;
+      const corner = (forward: number, side: number): Vec3 => ({
+        x: pad.x + along.x * (offset + forward) + across.x * side,
+        y: pad.y + along.y * (offset + forward) + across.y * side,
+        z: 0.24,
+      });
+      const chevron = polygonCommand(
+        camera,
+        `pad:${pad.id}:chevron:${index}`,
+        [
+          corner(chevronTip, 0),
+          corner(0, chevronSide),
+          corner(-chevronThickness, chevronSide),
+          corner(chevronTip - chevronThickness, 0),
+          corner(-chevronThickness, -chevronSide),
+          corner(0, -chevronSide),
+        ],
+        active ? "#0e2c34" : "#eafaff",
+      );
+      if (chevron) {
+        commands.push(chevron);
+      }
+    }
+  }
+  drawSorted(context, commands);
+};
+
+const drawPlacementPreview = (
+  context: CanvasRenderingContext2D,
+  camera: Camera,
+  build: BuildView,
+): void => {
+  const { walker } = build;
+  const along = { x: Math.cos(walker.heading), y: Math.sin(walker.heading) };
+  const across = { x: -along.y, y: along.x };
+  const corner = (forward: number, side: number): Vec3 => ({
+    x: walker.position.x + along.x * forward + across.x * side,
+    y: walker.position.y + along.y * forward + across.y * side,
+    z: 0.26,
+  });
+  const half = PAD_LENGTH_METERS / 2;
+  const side = PAD_WIDTH_METERS / 2;
+  const command = polygonCommand(
+    camera,
+    "placement-preview",
+    [
+      corner(half, side),
+      corner(half, -side),
+      corner(-half, -side),
+      corner(-half, side),
+    ],
+    build.placementValid
+      ? "rgba(100, 194, 139, 0.5)"
+      : "rgba(227, 91, 69, 0.5)",
+    build.placementValid ? "#8ff0b6" : "#ffb3a5",
+  );
+  if (command) {
+    drawPolygon(context, command);
+  }
+};
+
 const drawVehicle = (
   context: CanvasRenderingContext2D,
   camera: Camera,
@@ -630,18 +761,26 @@ export const renderChaseView = (
   selectedVehicle: VehicleDefinition,
   width: number,
   height: number,
+  scene: SceneOptions,
 ): void => {
-  const camera = makeCamera(state, width, height);
+  const view = sceneEye(state, scene);
+  const camera = makeCamera(view, width, height);
   const sky = context.createLinearGradient(0, 0, 0, height);
   sky.addColorStop(0, "#75909a");
   sky.addColorStop(0.56, "#31483f");
   sky.addColorStop(1, "#17251f");
   context.fillStyle = sky;
   context.fillRect(0, 0, width, height);
-  drawGround(context, camera, state);
+  drawGround(context, camera, view);
   drawLand(context, camera, course);
   drawRoads(context, camera, course, state, debug, selectedVehicle);
-  drawBuildings(context, camera, course, state);
+  drawBuildings(context, camera, course, view);
   drawCourseMarks(context, camera, course, state);
-  drawVehicle(context, camera, state, selectedVehicle);
+  if (scene.build) {
+    drawPlacementPreview(context, camera, scene.build);
+  }
+  drawBoostPads(context, camera, scene);
+  if (!scene.build) {
+    drawVehicle(context, camera, state, selectedVehicle);
+  }
 };

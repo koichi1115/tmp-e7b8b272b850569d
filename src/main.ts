@@ -1,22 +1,33 @@
 import "./style.css";
 import {
+  BOOST_DURATION_MS,
+  BOOST_MULTIPLIER,
+  boostedSpeedCap,
+  evaluatePadPlacement,
+  loadPads,
+  removePadAt,
+  savePads,
+  type BoostPad,
+} from "./boost-pads.ts";
+import { stepWalker, type Walker } from "./build-mode.ts";
+import {
   course as defaultCourse,
   courseFromFixture,
   type Course,
-} from "./course";
+} from "./course.ts";
 import {
   PREPARED_FIXTURE_KEY,
   type FixtureData,
-} from "./fixture";
-import { setupRangePreparation } from "./range-ui";
-import { createRace, formatTime, stepRace, type DriveInput } from "./race";
-import { renderRace, type ViewMode } from "./render";
+} from "./fixture.ts";
+import { setupRangePreparation } from "./range-ui.ts";
+import { createRace, formatTime, stepRace, type DriveInput } from "./race.ts";
+import { renderRace, type SceneOptions, type ViewMode } from "./render.ts";
 import {
   DEFAULT_VEHICLE_ID,
   VEHICLES,
   vehicleById,
   type VehicleId,
-} from "./vehicles";
+} from "./vehicles.ts";
 
 let course: Course = defaultCourse;
 let activeFixtureName = "宮坂2丁目";
@@ -66,6 +77,9 @@ app.innerHTML = `
           <span class="signal"></span>
           <span id="data-status">固定街区データ・通信なし</span>
         </div>
+        <button id="build-toggle" class="range-open" type="button">
+          コースを作る
+        </button>
         <button id="open-range" class="range-open" type="button">
           範囲を準備
         </button>
@@ -95,6 +109,11 @@ app.innerHTML = `
           </div>
         </div>
 
+        <div id="boost-badge" class="boost-badge" role="status" hidden>
+          加速パッド ×${BOOST_MULTIPLIER.toFixed(1)}
+          <small id="boost-remaining">0.0 s</small>
+        </div>
+
         <div class="stage-status">
           <span id="status-dot"></span>
           <span id="status">発走前</span>
@@ -122,6 +141,20 @@ app.innerHTML = `
         <div id="offroad-alert" class="offroad-alert" hidden>
           <span id="road-alert">路肩です · 速度低下</span>
         </div>
+
+        <div id="build-panel" class="build-panel" hidden>
+          <div class="build-head">
+            <span class="panel-kicker">コースを作る</span>
+            <strong id="build-hint">路面の上で設置できます</strong>
+          </div>
+          <dl>
+            <div><dt>↑ ↓ ← →</dt><dd>歩く</dd></div>
+            <div><dt>E</dt><dd>加速パッドを置く</dd></div>
+            <div><dt>X</dt><dd>足元のパッドを撤去</dd></div>
+            <div><dt>B</dt><dd>レースへ戻る</dd></div>
+          </dl>
+          <p id="build-message" class="build-message" role="alert" hidden></p>
+        </div>
       </div>
 
       <section id="touch-controls" class="touch-controls" aria-label="タッチ操作">
@@ -139,6 +172,20 @@ app.innerHTML = `
           </button>
           <button type="button" data-touch-action="accelerate" aria-label="アクセル">
             <strong>▲</strong><span>アクセル</span>
+          </button>
+        </div>
+        <div class="touch-cluster build-cluster" aria-label="コース作り">
+          <button type="button" data-build-action="enter" aria-label="コースを作る">
+            <strong>✚</strong><span>つくる</span>
+          </button>
+          <button type="button" data-build-action="place" aria-label="加速パッドを置く">
+            <strong>≫</strong><span>設置</span>
+          </button>
+          <button type="button" data-build-action="remove" aria-label="足元のパッドを撤去">
+            <strong>✕</strong><span>撤去</span>
+          </button>
+          <button type="button" data-build-action="exit" aria-label="レースへ戻る">
+            <strong>▶</strong><span>レースへ</span>
           </button>
         </div>
         <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
@@ -161,6 +208,10 @@ app.innerHTML = `
           </div>
           <div class="progress-track">
             <div id="progress-bar" class="progress-bar"></div>
+          </div>
+          <div class="progress-heading">
+            <span>加速パッド</span>
+            <strong><span id="pad-count">0</span> 個</strong>
           </div>
         </section>
 
@@ -195,6 +246,9 @@ app.innerHTML = `
             <span><kbd>R</kbd> やり直す</span>
             <span><kbd>G</kbd> 道路表示</span>
             <span><kbd>T</kbd> 俯瞰切替</span>
+            <span><kbd>B</kbd> コース作り</span>
+            <span><kbd>E</kbd> パッド設置</span>
+            <span><kbd>X</kbd> パッド撤去</span>
           </div>
         </section>
 
@@ -297,6 +351,17 @@ const touchControls = element<HTMLElement>("#touch-controls");
 const touchButtons = [
   ...document.querySelectorAll<HTMLButtonElement>("[data-touch-action]"),
 ];
+const buildButtons = [
+  ...document.querySelectorAll<HTMLButtonElement>("[data-build-action]"),
+];
+const buildToggle = element<HTMLButtonElement>("#build-toggle");
+const buildPanel = element<HTMLElement>("#build-panel");
+const buildHint = element<HTMLElement>("#build-hint");
+const buildMessage = element<HTMLElement>("#build-message");
+const boostBadge = element<HTMLElement>("#boost-badge");
+const boostRemaining = element<HTMLElement>("#boost-remaining");
+const padCount = element<HTMLElement>("#pad-count");
+const speedItem = speed.closest<HTMLElement>(".hud-item");
 
 const heldKeys = new Set<string>();
 type TouchAction = keyof DriveInput;
@@ -307,6 +372,24 @@ let race = createRace(course);
 let debug = false;
 let viewMode: ViewMode = "chase";
 let previousTime = performance.now();
+let mode: "race" | "build" = "race";
+let pads: readonly BoostPad[] = [];
+let walker: Walker = {
+  position: race.vehicle.position,
+  heading: race.vehicle.heading,
+};
+let placementValid = false;
+let messageText = "";
+let messageTone: "ok" | "error" = "ok";
+let messageUntil = 0;
+
+const MESSAGE_DURATION_MS = 3_200;
+
+const showMessage = (text: string, tone: "ok" | "error"): void => {
+  messageText = text;
+  messageTone = tone;
+  messageUntil = performance.now() + MESSAGE_DURATION_MS;
+};
 
 const updateTouchButtons = (): void => {
   const activeActions = new Set(touchPointers.values());
@@ -323,9 +406,54 @@ const clearTouchInput = (): void => {
   updateTouchButtons();
 };
 
+const enterBuildMode = (): void => {
+  mode = "build";
+  walker = {
+    position: race.vehicle.position,
+    heading: race.vehicle.heading,
+  };
+  heldKeys.clear();
+  clearTouchInput();
+  showMessage(
+    "路面の上まで歩いて、Eまたは設置ボタンで加速パッドを置きます。",
+    "ok",
+  );
+};
+
+const exitBuildMode = (): void => {
+  mode = "race";
+  race = createRace(course);
+  heldKeys.clear();
+  clearTouchInput();
+  showMessage("", "ok");
+};
+
+const placePad = (): void => {
+  const placement = evaluatePadPlacement(course, pads, walker.position);
+  if (!placement.accepted) {
+    showMessage(placement.message, "error");
+    return;
+  }
+  pads = [...pads, placement.pad];
+  savePads(course, pads, localStorage);
+  showMessage(`加速パッドを置きました（${pads.length}個）。`, "ok");
+};
+
+const removePad = (): void => {
+  const result = removePadAt(pads, walker.position);
+  if (!result.removed) {
+    showMessage("足元に加速パッドがありません。", "error");
+    return;
+  }
+  pads = result.pads;
+  savePads(course, pads, localStorage);
+  showMessage(`加速パッドを撤去しました（${pads.length}個）。`, "ok");
+};
+
 const selectVehicle = (vehicleId: VehicleId): void => {
   selectedVehicleId = vehicleId;
   selectedVehicle = vehicleById(vehicleId);
+  mode = "race";
   race = createRace(course);
   heldKeys.clear();
   clearTouchInput();
@@ -352,6 +480,12 @@ const activateCourse = (
   activeFixtureName = name;
   usingPreparedFixture = prepared;
   race = createRace(course);
+  pads = loadPads(course, localStorage);
+  mode = "race";
+  walker = {
+    position: race.vehicle.position,
+    heading: race.vehicle.heading,
+  };
   heldKeys.clear();
   clearTouchInput();
   viewMode = "chase";
@@ -418,6 +552,30 @@ for (const button of touchButtons) {
   button.addEventListener("lostpointercapture", releaseTouchPointer);
 }
 
+for (const button of buildButtons) {
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    const action = button.dataset.buildAction;
+    if (action === "enter") {
+      enterBuildMode();
+    } else if (action === "exit") {
+      exitBuildMode();
+    } else if (action === "place" && mode === "build") {
+      placePad();
+    } else if (action === "remove" && mode === "build") {
+      removePad();
+    }
+  });
+}
+
+buildToggle.addEventListener("click", () => {
+  if (mode === "build") {
+    exitBuildMode();
+  } else {
+    enterBuildMode();
+  }
+});
+
 touchControls.addEventListener("contextmenu", (event) => {
   event.preventDefault();
 });
@@ -435,19 +593,38 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     heldKeys.add(key);
   }
-  if (!event.repeat && key === "r") {
-    race = createRace(course);
+  if (event.repeat) {
+    return;
   }
-  if (!event.repeat && key === "g") {
+  if (key === "b") {
+    if (mode === "build") {
+      exitBuildMode();
+    } else {
+      enterBuildMode();
+    }
+  }
+  if (key === "g") {
     debug = !debug;
   }
-  if (!event.repeat && key === "t") {
+  if (key === "t") {
     viewMode = viewMode === "chase" ? "topDown" : "chase";
   }
-  if (!event.repeat && key === "1") {
+  if (mode === "build") {
+    if (key === "e") {
+      placePad();
+    }
+    if (key === "x") {
+      removePad();
+    }
+    return;
+  }
+  if (key === "r") {
+    race = createRace(course);
+  }
+  if (key === "1") {
     selectVehicle("street");
   }
-  if (!event.repeat && key === "2") {
+  if (key === "2") {
     selectVehicle("alley");
   }
 });
@@ -480,15 +657,54 @@ const readInput = (): DriveInput => {
 };
 
 const updateInterface = (): void => {
+  const building = mode === "build";
+  const boosting = race.boostRemainingMs > 0;
+  if (messageText && performance.now() > messageUntil) {
+    messageText = "";
+  }
+  buildPanel.hidden = !building;
+  buildToggle.textContent = building ? "レースへ戻る" : "コースを作る";
+  buildToggle.classList.toggle("active", building);
+  buildHint.textContent = building
+    ? placementValid
+      ? "ここに置けます"
+      : "ここには置けません"
+    : "路面の上で設置できます";
+  buildHint.dataset.state = placementValid ? "valid" : "invalid";
+  buildMessage.hidden = messageText === "";
+  buildMessage.textContent = messageText;
+  buildMessage.dataset.tone = messageTone;
+  touchControls.dataset.mode = mode;
+  padCount.textContent = String(pads.length);
+  boostBadge.hidden = building || !boosting;
+  boostRemaining.textContent = `${(race.boostRemainingMs / 1_000).toFixed(1)} s`;
+  canvas.dataset.buildMode = String(building);
+  canvas.dataset.padCount = String(pads.length);
+  canvas.dataset.padIds = pads.map((pad) => pad.id).join(",");
+  canvas.dataset.walkerX = walker.position.x.toFixed(4);
+  canvas.dataset.walkerY = walker.position.y.toFixed(4);
+  canvas.dataset.walkerHeading = walker.heading.toFixed(6);
+  canvas.dataset.placementValid = String(placementValid);
+  canvas.dataset.buildMessage = messageText;
+  canvas.dataset.buildMessageTone = messageText ? messageTone : "";
+  canvas.dataset.boostActive = String(boosting);
+  canvas.dataset.boostRemainingMs = race.boostRemainingMs.toFixed(1);
+  canvas.dataset.boostHits = String(race.boostHits);
+  canvas.dataset.boostPadId = race.boostPadId ?? "";
+  canvas.dataset.boostedMaxSpeed = boostedSpeedCap(selectedVehicleId).toFixed(4);
+  canvas.dataset.boostDurationMs = String(BOOST_DURATION_MS);
+
   timer.textContent = formatTime(race.elapsedMs);
   speed.textContent = String(Math.round(Math.abs(race.vehicle.speed) * 3.6));
   checkpoints.textContent = String(race.checkpointsPassed);
   const displayProgress = race.kind === "finished" ? 1 : race.progress;
   progressLabel.textContent = `${Math.floor(displayProgress * 100)}%`;
   progressBar.style.width = `${Math.max(0, Math.min(1, displayProgress)) * 100}%`;
-  readyPanel.hidden = race.kind !== "ready";
-  finishPanel.hidden = race.kind !== "finished";
-  offroadAlert.hidden = race.onRoad && race.blockedForMs <= 0;
+  readyPanel.hidden = building || race.kind !== "ready";
+  finishPanel.hidden = building || race.kind !== "finished";
+  offroadAlert.hidden =
+    building || (race.onRoad && race.blockedForMs <= 0);
+  speedItem?.classList.toggle("boosting", boosting);
   roadAlert.textContent =
     race.blockedForMs > 0
       ? "この道路は通行できません · 後退できます"
@@ -514,7 +730,10 @@ const updateInterface = (): void => {
     .join(",");
   canvas.dataset.viewMode = viewMode;
 
-  if (race.kind === "ready") {
+  if (building) {
+    status.textContent = "コース作り";
+    statusDot.dataset.state = "build";
+  } else if (race.kind === "ready") {
     status.textContent = "発走前";
     statusDot.dataset.state = "ready";
   } else if (race.kind === "running") {
@@ -536,13 +755,31 @@ const updateInterface = (): void => {
 const frame = (now: number): void => {
   const deltaSeconds = Math.min((now - previousTime) / 1_000, 0.1);
   previousTime = now;
-  race = stepRace(
-    race,
-    readInput(),
-    deltaSeconds,
-    course,
-    selectedVehicleId,
-  );
+  if (mode === "build") {
+    walker = stepWalker(walker, readInput(), deltaSeconds, course);
+    placementValid = evaluatePadPlacement(
+      course,
+      pads,
+      walker.position,
+    ).accepted;
+  } else {
+    race = stepRace(
+      race,
+      readInput(),
+      deltaSeconds,
+      course,
+      selectedVehicleId,
+      pads,
+    );
+  }
+  const scene: SceneOptions = {
+    pads,
+    boostPadId: race.boostPadId,
+    build:
+      mode === "build"
+        ? { walker, placementValid }
+        : null,
+  };
   updateInterface();
   const minimap = renderRace(
     canvas,
@@ -551,6 +788,7 @@ const frame = (now: number): void => {
     debug,
     viewMode,
     selectedVehicle,
+    scene,
   );
   canvas.dataset.minimapArrowX = minimap.arrowX.toFixed(3);
   canvas.dataset.minimapArrowY = minimap.arrowY.toFixed(3);

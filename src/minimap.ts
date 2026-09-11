@@ -1,10 +1,18 @@
-import type { Course, Vec2 } from "./course";
-import type { Vehicle } from "./race";
+import type { BoostPad } from "./boost-pads.ts";
+import type { Walker } from "./build-mode.ts";
+import type { Course, Vec2 } from "./course.ts";
+import type { Vehicle } from "./race.ts";
 import {
   isRoadPassable,
   type VehicleDefinition,
   type VehicleId,
-} from "./vehicles";
+} from "./vehicles.ts";
+
+export type MinimapOverlay = Readonly<{
+  pads: readonly BoostPad[];
+  boostPadId: string | null;
+  build: Readonly<{ walker: Walker }> | null;
+}>;
 
 export type MinimapRenderResult = Readonly<{
   arrowX: number;
@@ -145,6 +153,7 @@ export const drawMinimap = (
   selectedVehicle: VehicleDefinition,
   viewportWidth: number,
   viewportHeight: number,
+  overlay: MinimapOverlay = { pads: [], boostPadId: null, build: null },
 ): MinimapRenderResult => {
   const originX = viewportWidth - WIDTH - MARGIN;
   const originY = viewportHeight - HEIGHT - MARGIN;
@@ -164,6 +173,27 @@ export const drawMinimap = (
   context.beginPath();
   context.roundRect(originX + 1, originY + 1, WIDTH - 2, HEIGHT - 2, 11);
   context.clip();
+  for (const pad of overlay.pads) {
+    const mapped = mapPoint({ x: pad.x, y: pad.y }, transform);
+    context.beginPath();
+    context.arc(
+      originX + mapped.x,
+      originY + mapped.y,
+      pad.id === overlay.boostPadId ? 3.4 : 2.4,
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle =
+      pad.id === overlay.boostPadId ? "#9beefb" : "#2fa8c9";
+    context.fill();
+  }
+  if (overlay.build) {
+    const mapped = mapPoint(overlay.build.walker.position, transform);
+    context.beginPath();
+    context.arc(originX + mapped.x, originY + mapped.y, 2.6, 0, Math.PI * 2);
+    context.fillStyle = "#64c28b";
+    context.fill();
+  }
   context.translate(arrowX, arrowY);
   context.rotate(vehicle.heading);
   context.beginPath();

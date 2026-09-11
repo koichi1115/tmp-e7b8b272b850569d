@@ -1,20 +1,26 @@
+import { padFootprint } from "./boost-pads.ts";
 import {
   pointAtProgress,
   type Course,
   type Vec2,
-} from "./course";
+} from "./course.ts";
 import {
   drawMinimap,
   type MinimapRenderResult,
-} from "./minimap";
-import { renderChaseView } from "./perspective";
-import type { RaceState } from "./race";
+} from "./minimap.ts";
+import {
+  renderChaseView,
+  type BuildView,
+  type SceneOptions,
+} from "./perspective.ts";
+import type { RaceState } from "./race.ts";
 import {
   isRoadPassable,
   type VehicleDefinition,
-} from "./vehicles";
+} from "./vehicles.ts";
 
 export type ViewMode = "chase" | "topDown";
+export type { BuildView, SceneOptions };
 
 type Viewport = Readonly<{
   scale: number;
@@ -303,6 +309,44 @@ const drawCheckpoints = (
   });
 };
 
+const drawPads = (
+  context: CanvasRenderingContext2D,
+  viewport: Viewport,
+  scene: SceneOptions,
+): void => {
+  context.save();
+  for (const pad of scene.pads) {
+    context.beginPath();
+    traceLine(context, padFootprint(pad), viewport);
+    context.closePath();
+    context.fillStyle =
+      pad.id === scene.boostPadId ? "#7de3f3" : "#2fa8c9";
+    context.fill();
+    context.strokeStyle = "#eafaff";
+    context.lineWidth = Math.max(1, viewport.scale * 0.3);
+    context.stroke();
+  }
+  if (scene.build) {
+    const walker = screenPoint(scene.build.walker.position, viewport);
+    context.beginPath();
+    context.arc(
+      walker.x,
+      walker.y,
+      Math.max(4, viewport.scale * 1.6),
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = scene.build.placementValid
+      ? "rgba(100, 194, 139, 0.85)"
+      : "rgba(227, 91, 69, 0.85)";
+    context.fill();
+    context.strokeStyle = "#f7fbf8";
+    context.lineWidth = 1.5;
+    context.stroke();
+  }
+  context.restore();
+};
+
 const drawVehicle = (
   context: CanvasRenderingContext2D,
   state: RaceState,
@@ -359,6 +403,7 @@ export const renderRace = (
   debug: boolean,
   viewMode: ViewMode,
   selectedVehicle: VehicleDefinition,
+  scene: SceneOptions = { pads: [], boostPadId: null, build: null },
 ): MinimapRenderResult => {
   const context = canvas.getContext("2d");
   if (!context) {
@@ -375,6 +420,7 @@ export const renderRace = (
       selectedVehicle,
       viewport.width,
       viewport.height,
+      scene,
     );
   } else {
     context.fillStyle = "#14211c";
@@ -401,6 +447,7 @@ export const renderRace = (
     drawCourse(context, course, viewport, state.progress);
     drawCheckpoints(context, course, viewport, state.checkpointsPassed);
     drawStartLine(context, course, viewport);
+    drawPads(context, viewport, scene);
     drawVehicle(context, state, viewport, selectedVehicle);
     drawNorthArrow(context, viewport);
   }
@@ -411,5 +458,6 @@ export const renderRace = (
     selectedVehicle,
     viewport.width,
     viewport.height,
+    scene,
   );
 };
