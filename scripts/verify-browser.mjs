@@ -1,3 +1,9 @@
+/** 壊れた検証スクリプト。直接実行しても fail-closed。npm run browser:verify も無効化済み。 */
+console.error(
+  "scripts/verify-browser.mjs は復元ギャップで壊れています（startSnapshot is not defined）。npm run build-mode:verify を使ってください。",
+);
+process.exit(1);
+
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const APP_URL = process.env.APP_URL ?? "http://127.0.0.1:43177/";

@@ -152,10 +152,10 @@ npm run free-range:verify
 OVERPASS_INTEGRATION=1 npm run free-range:verify
 ```
 
-通常の起動と `npm run build` はネットワークを必要としません。ブラウザ検証はリモートデバッグを有効にしたブラウザを用意し、必要なら `APP_URL` と `CDP_URL` を指定して実行します。
+通常の起動と `npm run build` はネットワークを必要としません。旧 `npm run browser:verify` は VM 復元ギャップで `scripts/verify-browser.mjs` が壊れているため**無効**です（実行すると非ゼロで止まります）。スライス8以降のブラウザ系証明は次を使います。
 
 ```sh
-npm run browser:verify
+npm run build-mode:verify
 ```
 
 ## スライス8のコース作りと加速パッド
