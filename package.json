@@ -1,0 +1,20 @@
+{
+  "name": "kinjo-race",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "data:refresh": "node scripts/build-fixture.mjs",
+    "data:verify": "node scripts/verify-fixture.mjs",
+    "vehicle:verify": "node --experimental-strip-types --test tests/vehicles.test.ts",
+    "free-range:verify": "node --experimental-strip-types --test tests/free-range.test.ts",
+    "browser:verify": "node scripts/verify-browser.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}
