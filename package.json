@@ -15,7 +15,8 @@
     "boost:lap": "node --experimental-strip-types scripts/verify-boost-lap.mjs",
     "test": "npm run vehicle:verify && npm run free-range:verify && npm run boost:verify",
     "browser:verify": "node scripts/browser-verify-disabled.mjs",
-    "build-mode:verify": "node scripts/verify-build-mode.mjs"
+    "build-mode:verify": "node scripts/verify-build-mode.mjs",
+    "another-lap:verify": "node scripts/verify-another-lap.mjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

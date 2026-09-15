@@ -382,6 +382,28 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
+.another-lap {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  margin: 0 0 12px;
+  border: 1px solid #f5c451;
+  border-radius: 12px;
+  color: #101915;
+  background: #f5c451;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.another-lap:active {
+  transform: translateY(2px);
+}
+
 .side-panel {
   display: flex;
   min-width: 0;

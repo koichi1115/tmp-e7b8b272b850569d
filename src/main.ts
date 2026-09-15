@@ -135,6 +135,9 @@ app.innerHTML = `
           <span class="panel-kicker">1周完了</span>
           <h2>完走</h2>
           <strong id="finish-time">00:00.00</strong>
+          <button id="another-lap" class="another-lap" type="button">
+            もう一周
+          </button>
           <p><kbd>R</kbd> でもう一度</p>
         </div>
 
@@ -333,6 +336,7 @@ const statusDot = element<HTMLElement>("#status-dot");
 const readyPanel = element<HTMLElement>("#ready-panel");
 const finishPanel = element<HTMLElement>("#finish-panel");
 const finishTime = element<HTMLElement>("#finish-time");
+const anotherLapButton = element<HTMLButtonElement>("#another-lap");
 const offroadAlert = element<HTMLElement>("#offroad-alert");
 const roadAlert = element<HTMLElement>("#road-alert");
 const debugBadge = element<HTMLElement>("#debug-badge");
@@ -382,6 +386,7 @@ let placementValid = false;
 let messageText = "";
 let messageTone: "ok" | "error" = "ok";
 let messageUntil = 0;
+let restartCount = 0;
 
 const MESSAGE_DURATION_MS = 3_200;
 
@@ -404,6 +409,15 @@ const updateTouchButtons = (): void => {
 const clearTouchInput = (): void => {
   touchPointers.clear();
   updateTouchButtons();
+};
+
+// Key R and the finish panel button share this one restart path.
+// Course, vehicle, and pads stay as they are.
+const restartRace = (): void => {
+  race = createRace(course);
+  heldKeys.clear();
+  clearTouchInput();
+  restartCount += 1;
 };
 
 const enterBuildMode = (): void => {
@@ -568,6 +582,13 @@ for (const button of buildButtons) {
   });
 }
 
+anotherLapButton.addEventListener("click", (event) => {
+  event.preventDefault();
+  if (mode === "race" && race.kind === "finished") {
+    restartRace();
+  }
+});
+
 buildToggle.addEventListener("click", () => {
   if (mode === "build") {
     exitBuildMode();
@@ -619,7 +640,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (key === "r") {
-    race = createRace(course);
+    restartRace();
   }
   if (key === "1") {
     selectVehicle("street");
@@ -713,6 +734,10 @@ const updateInterface = (): void => {
   viewBadge.textContent =
     viewMode === "chase" ? "追従カメラ" : "俯瞰表示";
   canvas.dataset.raceKind = race.kind;
+  canvas.dataset.elapsedMs = race.elapsedMs.toFixed(1);
+  canvas.dataset.restartCount = String(restartCount);
+  canvas.dataset.fixtureName = activeFixtureName;
+  canvas.dataset.preparedFixture = String(usingPreparedFixture);
   canvas.dataset.vehicleX = race.vehicle.position.x.toFixed(4);
   canvas.dataset.vehicleY = race.vehicle.position.y.toFixed(4);
   canvas.dataset.vehicleHeading = race.vehicle.heading.toFixed(6);
