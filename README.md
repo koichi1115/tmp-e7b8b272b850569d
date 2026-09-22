@@ -2,9 +2,15 @@
 
 実在する住宅街の道路形状を一周する、小さなレースです。Vite、TypeScript、Canvas 2D だけで動きます。低い追従カメラから、道路、建物、土地利用をソリッド色で描きます。バックエンドはありません。レース中はコミット済み、または明示準備して端末へ保存したJSONだけを読みます。
 
+## 公開URL
+
+<https://koichi1115.github.io/tmp-e7b8b272b850569d/>
+
+インストール不要です。スマートフォンのブラウザで開くと、画面のボタンだけで車を選んで一周できます。
+
 ## インストールと起動
 
-Node.js 20.19 以降を使います。
+起動と `npm run build` は Node.js 20.19 以降で動きます。`npm test` は型注釈付きのテストを直接実行するため、`--experimental-strip-types` が入った **Node.js 22.6 以降**が必要です。CI（`ci/pages.yml`）は Node 22 に固定しています。
 
 ```sh
 npm install
@@ -197,3 +203,41 @@ npm run another-lap:verify
 ```
 
 `another-lap:verify` は `build-mode:verify` と同じ方式で、起動中の開発サーバー（`APP_URL`、既定 `http://127.0.0.1:43177/`）とChromeのリモートデバッグ（`CDP_URL`、既定 `http://127.0.0.1:9222`）を使います。390px幅のスマートフォン表示で、タッチボタンだけでパッドを2枚置き、1周を完走し、「もう一周」を指で押して、同じコース・車両・パッドのまま発走前へ戻ることを確かめます。そのあと2周目を完走し、最後に `R` キーも同じ関数を通ることを確かめます。各段階の合否を表示し、`PROOF_DIR`（既定 `/tmp/kinjo-race-another-lap-proof`）へ `01-完走1回目.png`、`02-もう一周をタップ後.png`、`03-完走2回目.png` を保存します。1件でも不合格なら非ゼロで終了します。
+
+## スライス10の公開
+
+開発機に居ない人が、公開URLだけで車を選び、タッチでゴールまで走れる状態にしました。
+
+### 配信元とベースパス
+
+GitHub Pages はリポジトリ名のサブパスで配信するため、アセットの接頭辞をビルド時に差し込みます。`vite.config.ts` は `base` を `process.env.KINJO_BASE ?? "/"` にしているので、ローカルの `npm run dev` と `npm run build` は今まで通り `/` のままです。公開用ビルドだけ次のように接頭辞を付けます。
+
+```sh
+KINJO_BASE=/tmp-e7b8b272b850569d/ npm run pages:build
+```
+
+### 公開スモーク
+
+```sh
+npm run public-play:verify -- --static --base /tmp-e7b8b272b850569d/
+npm run public-play:verify -- --remote --url https://koichi1115.github.io/tmp-e7b8b272b850569d/
+npm run public-play:verify -- --cdp    --url https://koichi1115.github.io/tmp-e7b8b272b850569d/
+```
+
+段を指定しなければ3段すべてを走らせます。3段の役割は次の通りです。
+
+- `--static` は `dist/index.html` のアセット参照がすべて `KINJO_BASE` で始まり、その実体が `dist` に存在することを確かめます。ベースパスの取り違えはここで止まります。
+- `--remote` は公開URLがHTTPSで200を返し、`#app` とモジュールスクリプトが配信され、参照されているアセットもすべて200であることを確かめます。
+- `--cdp` は実ブラウザを390×844のタッチ端末として公開URLへ繋ぎ、指の入力だけで車両を「こみちぐるま」へ変え、そのままゴールまで走れることを確かめます。`PROOF_DIR`（既定 `/tmp/kinjo-race-public-play-proof`）へ `01-公開URLの初期表示.png`、`02-タッチで車両を選んだ直後.png`、`03-タッチだけで完走.png` を保存します。
+
+**確認できなかったものを緑にはしません。** `dist` が無い、URLが未指定、CDPに繋がらない、といった場合は「未実行」と明示して非ゼロで終了します。1件でも不合格なら非ゼロで終了します。
+
+### 公開の手順
+
+```sh
+KINJO_BASE=/tmp-e7b8b272b850569d/ npm run pages:deploy
+```
+
+`pages:deploy` は作業ツリーが汚れていないことを確かめ、`KINJO_BASE` 付きでビルドし、静的スモークを通したものだけを `gh-pages` ブランチへ載せます。
+
+本来は Actions（`ci/pages.yml`）で `main` への push ごとに test → build → 静的スモーク → deploy → 遠隔スモークを回す作りです。ただし現在の資格情報には `workflow` スコープが無く、`.github/workflows/` 配下を push すると GitHub 側が拒否します。そのため定義を `ci/pages.yml` に置き、同じ成果物を `gh-pages` ブランチへ配信する形で公開しています。`workflow` スコープ付きの資格情報を用意できたら `git mv ci/pages.yml .github/workflows/pages.yml` して push し、Pages の配信元を「GitHub Actions」へ戻してください。

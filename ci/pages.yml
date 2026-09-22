@@ -1,0 +1,92 @@
+# GitHub Pages への配信ワークフロー。
+#
+# 置き場所: .github/workflows/pages.yml
+#
+# いまの資格情報には `workflow` スコープが無く、.github/workflows/ 配下を
+# push すると GitHub に拒否されます（refusing to allow an OAuth App to
+# create or update workflow ... without `workflow` scope）。そのため定義だけを
+# ここに置いています。`workflow` スコープ付きの資格情報を用意できたら
+#
+#   git mv ci/pages.yml .github/workflows/pages.yml
+#
+# として push し、リポジトリ設定の Pages の配信元を「GitHub Actions」へ戻して
+# ください。それまでは npm run pages:deploy による gh-pages ブランチ配信を
+# 使います（同じ成果物・同じ検証を通ります）。
+#
+# tests が --experimental-strip-types を使うため Node は 22 以上に固定します。
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  KINJO_BASE: /tmp-e7b8b272b850569d/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: テスト
+        run: npm test
+
+      - name: ビルド（KINJO_BASE 付き）
+        run: npm run pages:build
+
+      - name: 公開スモーク（静的）
+        run: npm run public-play:verify -- --static --base "$KINJO_BASE"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: 公開スモーク（遠隔）
+        env:
+          PUBLIC_URL: ${{ needs.deploy.outputs.page_url || 'https://koichi1115.github.io/tmp-e7b8b272b850569d/' }}
+        run: npm run public-play:verify -- --remote --url "$PUBLIC_URL"

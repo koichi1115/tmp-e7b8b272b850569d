@@ -16,7 +16,10 @@
     "test": "npm run vehicle:verify && npm run free-range:verify && npm run boost:verify",
     "browser:verify": "node scripts/browser-verify-disabled.mjs",
     "build-mode:verify": "node scripts/verify-build-mode.mjs",
-    "another-lap:verify": "node scripts/verify-another-lap.mjs"
+    "another-lap:verify": "node scripts/verify-another-lap.mjs",
+    "public-play:verify": "node scripts/verify-public-play.mjs",
+    "pages:build": "tsc && vite build",
+    "pages:deploy": "node scripts/deploy-pages.mjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
