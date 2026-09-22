@@ -320,12 +320,23 @@ const verifyCdp = async () => {
     return;
   }
 
+  // 新しいタブを開きます。前の実行で指が残ったタブを使い回すと、
+  // タッチが一切届かないまま「走れない」と誤判定するためです。
   let target;
+  let openedTarget = null;
   try {
-    const targets = await fetch(`${CDP_URL}/json/list`).then((response) =>
-      response.json(),
-    );
-    target = targets.find((candidate) => candidate.type === "page");
+    const created = await fetch(`${CDP_URL}/json/new?about:blank`, {
+      method: "PUT",
+    });
+    if (created.ok) {
+      target = await created.json();
+      openedTarget = target.id;
+    } else {
+      const targets = await fetch(`${CDP_URL}/json/list`).then((response) =>
+        response.json(),
+      );
+      target = targets.find((candidate) => candidate.type === "page");
+    }
   } catch (error) {
     notRun(
       "実機検査",
@@ -333,10 +344,15 @@ const verifyCdp = async () => {
     );
     return;
   }
-  if (!target) {
+  if (!target?.webSocketDebuggerUrl) {
     notRun("実機検査", `CDP（${CDP_URL}）に page ターゲットがありません。`);
     return;
   }
+  const closeTarget = async () => {
+    if (openedTarget) {
+      await fetch(`${CDP_URL}/json/close/${openedTarget}`).catch(() => {});
+    }
+  };
 
   const client = new ProtocolClient(target.webSocketDebuggerUrl);
   await client.open();
@@ -446,6 +462,7 @@ const verifyCdp = async () => {
   if (boot.booted !== true) {
     notRun("実機検査（タッチ操作）", "アプリが起動していないため操作へ進めません。");
     client.close();
+    await closeTarget();
     return;
   }
 
@@ -467,13 +484,18 @@ const verifyCdp = async () => {
       touchPoints: touchPoints(),
     });
   };
+  // touchEnd の touchPoints は「離した指」を渡します（残っている指ではありません）。
   const touchUp = async (id) => {
-    if (!activeTouches.delete(id)) {
+    const point = activeTouches.get(id);
+    if (!point) {
       return;
     }
+    activeTouches.delete(id);
     await client.send("Input.dispatchTouchEvent", {
       type: "touchEnd",
-      touchPoints: touchPoints(),
+      touchPoints: [
+        { x: point.x, y: point.y, id, radiusX: 6, radiusY: 6, force: 1 },
+      ],
     });
   };
 
@@ -526,12 +548,45 @@ const verifyCdp = async () => {
 
   // --- タッチだけでゴールまで走る
   const { nearestProgress, pointAtDistance } = await buildLapGeometry();
-  const controlRects = {};
+  // 3つの座標は同じスクロール位置で一度に測ります。指を置く先がずれないようにするためです。
+  const controlRects = await evaluate(`(() => {
+    document.querySelector("#touch-controls")?.scrollIntoView({ block: "center" });
+    const measure = (action) => {
+      const node = document.querySelector('[data-touch-action="' + action + '"]');
+      if (!node) { return null; }
+      const rect = node.getBoundingClientRect();
+      const centre = {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      };
+      const hit = document.elementFromPoint(centre.x, centre.y);
+      return {
+        x: centre.x,
+        y: centre.y,
+        width: rect.width,
+        height: rect.height,
+        hittable: hit === node || node.contains(hit)
+      };
+    };
+    return {
+      accelerate: measure("accelerate"),
+      left: measure("left"),
+      right: measure("right")
+    };
+  })()`);
   for (const action of ["accelerate", "left", "right"]) {
-    controlRects[action] = await rectOf(`[data-touch-action="${action}"]`);
     record(
-      `タッチ操作ボタンがある: ${action}`,
+      `タッチ操作ボタンを指で押せる: ${action}`,
       controlRects[action] !== null && controlRects[action].hittable === true,
+    );
+    record(
+      `タッチ操作ボタンの当たり判定が44px以上: ${action}`,
+      controlRects[action] !== null &&
+        controlRects[action].width >= 44 &&
+        controlRects[action].height >= 44,
+      controlRects[action]
+        ? `${Math.round(controlRects[action].width)}x${Math.round(controlRects[action].height)}`
+        : "なし",
     );
   }
 
@@ -552,26 +607,30 @@ const verifyCdp = async () => {
   const delays = [300, 400, 500, 350];
   let state = await snapshot();
   let ticks = 0;
-  while (state.kind !== "finished" && ticks < 420) {
-    const position = { x: state.x, y: state.y };
-    const targetPoint = pointAtDistance(nearestProgress(position) + 16);
-    const targetHeading = Math.atan2(
-      targetPoint.y - position.y,
-      targetPoint.x - position.x,
-    );
-    const headingError = Math.atan2(
-      Math.sin(targetHeading - state.heading),
-      Math.cos(targetHeading - state.heading),
-    );
-    await setFinger("accelerate", Math.abs(headingError) <= 1.05);
-    await setFinger("left", headingError < -0.05);
-    await setFinger("right", headingError > 0.05);
-    await wait(delays[ticks % delays.length]);
-    state = await snapshot();
-    ticks += 1;
-  }
-  for (const action of ["accelerate", "left", "right"]) {
-    await setFinger(action, false);
+  try {
+    while (state.kind !== "finished" && ticks < 420) {
+      const position = { x: state.x, y: state.y };
+      const targetPoint = pointAtDistance(nearestProgress(position) + 16);
+      const targetHeading = Math.atan2(
+        targetPoint.y - position.y,
+        targetPoint.x - position.x,
+      );
+      const headingError = Math.atan2(
+        Math.sin(targetHeading - state.heading),
+        Math.cos(targetHeading - state.heading),
+      );
+      await setFinger("accelerate", Math.abs(headingError) <= 1.05);
+      await setFinger("left", headingError < -0.05);
+      await setFinger("right", headingError > 0.05);
+      await wait(delays[ticks % delays.length]);
+      state = await snapshot();
+      ticks += 1;
+    }
+  } finally {
+    // 指を置いたまま終わるとブラウザのタッチ状態が残り、次の実行が必ず失敗します。
+    for (const action of ["accelerate", "left", "right"]) {
+      await setFinger(action, false).catch(() => {});
+    }
   }
   await wait(250);
 
@@ -596,6 +655,7 @@ const verifyCdp = async () => {
   await client.send("Emulation.setTouchEmulationEnabled", { enabled: false });
   await client.send("Emulation.clearDeviceMetricsOverride");
   client.close();
+  await closeTarget();
 
   console.log(
     JSON.stringify(

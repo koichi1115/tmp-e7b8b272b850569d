@@ -443,12 +443,15 @@ kbd {
   justify-content: space-between;
   gap: 12px;
   width: 100%;
+  /* 指で押す的は44px以上にします（完走パネルの「もう一周」と同じ基準）。 */
+  min-height: 44px;
   padding: 9px 10px;
   border: 1px solid #304139;
   border-radius: 9px;
   color: #8fa197;
   background: #17241f;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .vehicle-option span {
