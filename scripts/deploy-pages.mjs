@@ -23,13 +23,16 @@ if (!BASE) {
   process.exit(1);
 }
 
+// stdout を継承したときは execFileSync が null を返すため、空文字へ寄せます。
 const run = (command, args, options = {}) =>
-  execFileSync(command, args, {
-    cwd: ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-    ...options,
-  }).trim();
+  (
+    execFileSync(command, args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+      ...options,
+    }) ?? ""
+  ).trim();
 
 const remoteUrl = run("git", ["remote", "get-url", "origin"]);
 const sourceCommit = run("git", ["rev-parse", "HEAD"]);
