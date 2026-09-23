@@ -12,6 +12,8 @@ export type MinimapOverlay = Readonly<{
   pads: readonly BoostPad[];
   boostPadId: string | null;
   build: Readonly<{ walker: Walker }> | null;
+  /** 次に目指す経由点の番号（1始まり）。経由コースでない時は null。 */
+  nextViaNumber?: number | null;
 }>;
 
 export type MinimapRenderResult = Readonly<{
@@ -153,7 +155,12 @@ export const drawMinimap = (
   selectedVehicle: VehicleDefinition,
   viewportWidth: number,
   viewportHeight: number,
-  overlay: MinimapOverlay = { pads: [], boostPadId: null, build: null },
+  overlay: MinimapOverlay = {
+    pads: [],
+    boostPadId: null,
+    build: null,
+    nextViaNumber: null,
+  },
 ): MinimapRenderResult => {
   const originX = viewportWidth - WIDTH - MARGIN;
   const originY = viewportHeight - HEIGHT - MARGIN;
@@ -187,6 +194,33 @@ export const drawMinimap = (
       pad.id === overlay.boostPadId ? "#9beefb" : "#2fa8c9";
     context.fill();
   }
+  // 経由コースでは、通る順の番号を走行中の地図にも出します。
+  course.viaPoints.forEach((via, index) => {
+    const mapped = mapPoint(via, transform);
+    const next = overlay.nextViaNumber === index + 1;
+    context.beginPath();
+    context.arc(
+      originX + mapped.x,
+      originY + mapped.y,
+      next ? 7 : 5.6,
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = next ? "#f5c451" : "#16241f";
+    context.fill();
+    context.strokeStyle = next ? "#fff1ba" : "#b7c8bd";
+    context.lineWidth = 1.4;
+    context.stroke();
+    context.fillStyle = next ? "#17231f" : "#e7ede8";
+    context.font = "700 8px ui-monospace, monospace";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(
+      String(index + 1),
+      originX + mapped.x,
+      originY + mapped.y + 0.5,
+    );
+  });
   if (overlay.build) {
     const mapped = mapPoint(overlay.build.walker.position, transform);
     context.beginPath();

@@ -39,6 +39,8 @@ export type Course = Readonly<{
   lapCumulative: readonly number[];
   lapLength: number;
   checkpointFractions: readonly number[];
+  /** 経由指定コースだけが持つ、通る順の交差点の位置。自動選出では空です。 */
+  viaPoints: readonly Vec2[];
 }>;
 
 export type CoursePosition = Readonly<{
@@ -198,6 +200,10 @@ export const courseFromFixture = (data: FixtureData): Course => {
     throw new Error("Fixture lap length is inconsistent.");
   }
 
+  const viaPoints = (data.course.viaNodeIds ?? []).map((nodeId) =>
+    required(pointsByNode.get(nodeId), `Via node ${nodeId} is absent.`),
+  );
+
   return {
     place: data.place,
     bboxLabel: `${bbox.south}, ${bbox.west}, ${bbox.north}, ${bbox.east}`,
@@ -211,7 +217,30 @@ export const courseFromFixture = (data: FixtureData): Course => {
     lapCumulative,
     lapLength,
     checkpointFractions: data.course.checkpointFractions,
+    viaPoints,
   };
+};
+
+/**
+ * 通過点の表示番号。経由コースでは1番目の経由点が出発地点なので、
+ * チェックポイント i は経由 i+2 にあたります。
+ */
+export const checkpointLabel = (
+  targetCourse: Course,
+  index: number,
+): string =>
+  String(targetCourse.viaPoints.length > 0 ? index + 2 : index + 1);
+
+/** 次に目指す経由点の番号（1始まり）。経由コースでない時は null。 */
+export const nextViaNumber = (
+  targetCourse: Course,
+  checkpointsPassed: number,
+): number | null => {
+  const total = targetCourse.viaPoints.length;
+  if (total === 0) {
+    return null;
+  }
+  return checkpointsPassed + 2 <= total ? checkpointsPassed + 2 : 1;
 };
 
 export const course = courseFromFixture(

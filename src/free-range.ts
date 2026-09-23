@@ -9,6 +9,10 @@ import type {
 } from "./fixture.ts";
 
 export const MAX_BBOX_AREA_M2 = 500_000;
+/** 自動選出コースの通過点。経由指定では経由点そのものを使います。 */
+export const DEFAULT_CHECKPOINT_FRACTIONS: readonly number[] = [
+  0.2, 0.4, 0.6, 0.8,
+];
 export const OVERPASS_ENDPOINT =
   "https://overpass.private.coffee/api/interpreter";
 
@@ -20,7 +24,8 @@ const DISPLAY_TYPES = new Set([
   "tertiary",
   "unclassified",
 ]);
-const LAP_TYPES = new Set([
+/** 周回路に使える道路種別。経由コース（via-lap.ts）と共有します。 */
+export const LAP_HIGHWAY_TYPES: ReadonlySet<string> = new Set([
   "residential",
   "tertiary",
   "unclassified",
@@ -353,7 +358,7 @@ export const generateLap = (
   >();
 
   for (const road of roads) {
-    if (!LAP_TYPES.has(road.highway)) {
+    if (!LAP_HIGHWAY_TYPES.has(road.highway)) {
       continue;
     }
     for (let index = 1; index < road.points.length; index += 1) {
@@ -550,6 +555,36 @@ export const generateLap = (
   };
 };
 
+const requireRoads = (
+  ways: readonly OsmWay[],
+  bbox: Bbox,
+): FixtureRoad[] => {
+  const roads = collectRoads(ways, bbox);
+  if (roads.length === 0) {
+    throw new RangePreparationError(
+      "no_roads",
+      "道路が範囲内にありません。",
+    );
+  }
+  return roads;
+};
+
+/** 応答から走行可能な道路だけを取り出します。周回路はまだ決めません。 */
+export const prepareRoads = (
+  payload: OverpassPayload,
+  bbox: Bbox,
+): readonly FixtureRoad[] => {
+  validateBbox(bbox);
+  return requireRoads(parseWays(payload), bbox);
+};
+
+export type PreparedCourse = Readonly<{
+  lapNodeIds: readonly number[];
+  lapLengthMeters: number;
+  checkpointFractions?: readonly number[];
+  viaNodeIds?: readonly number[];
+}>;
+
 export const prepareFixture = (
   payload: OverpassPayload,
   bbox: Bbox,
@@ -559,17 +594,13 @@ export const prepareFixture = (
     endpoint?: string;
     query?: string;
   }>,
+  options: Readonly<{ lap?: PreparedCourse }> = {},
 ): FixtureData => {
   validateBbox(bbox);
   const ways = parseWays(payload);
-  const roads = collectRoads(ways, bbox);
-  if (roads.length === 0) {
-    throw new RangePreparationError(
-      "no_roads",
-      "道路が範囲内にありません。",
-    );
-  }
-  const course = generateLap(roads, bbox);
+  const roads = requireRoads(ways, bbox);
+  // 経由指定のコースが渡された時だけ、自動選出をしません。
+  const course: PreparedCourse = options.lap ?? generateLap(roads, bbox);
   const closedWays = ways.filter((way) => {
     const first = way.geometry[0];
     const last = way.geometry.at(-1);
@@ -624,8 +655,11 @@ export const prepareFixture = (
     },
     course: {
       roadWidthMeters: 14,
-      checkpointFractions: [0.2, 0.4, 0.6, 0.8],
-      ...course,
+      checkpointFractions:
+        course.checkpointFractions ?? DEFAULT_CHECKPOINT_FRACTIONS,
+      lapLengthMeters: course.lapLengthMeters,
+      lapNodeIds: course.lapNodeIds,
+      ...(course.viaNodeIds ? { viaNodeIds: course.viaNodeIds } : {}),
     },
     roads,
     buildings,

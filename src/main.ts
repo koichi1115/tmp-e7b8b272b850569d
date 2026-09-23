@@ -13,12 +13,15 @@ import { stepWalker, type Walker } from "./build-mode.ts";
 import {
   course as defaultCourse,
   courseFromFixture,
+  nextViaNumber,
   type Course,
 } from "./course.ts";
+import { PREPARED_FIXTURE_KEY } from "./fixture.ts";
 import {
-  PREPARED_FIXTURE_KEY,
-  type FixtureData,
-} from "./fixture.ts";
+  PreparedRecordError,
+  parsePreparedRecord,
+  type PreparedRecord,
+} from "./prepared-record.ts";
 import { setupRangePreparation } from "./range-ui.ts";
 import { createRace, formatTime, stepRace, type DriveInput } from "./race.ts";
 import { renderRace, type SceneOptions, type ViewMode } from "./render.ts";
@@ -33,16 +36,23 @@ let course: Course = defaultCourse;
 let activeFixtureName = "宮坂2丁目";
 let usingPreparedFixture = false;
 let storedFixtureError = "";
+let restoredRecord: PreparedRecord | null = null;
 const storedFixture = localStorage.getItem(PREPARED_FIXTURE_KEY);
+const CLEAR_HINT =
+  "「保存データを消す」で消してから、もう一度準備してください。";
 if (storedFixture) {
   try {
-    const preparedFixture = JSON.parse(storedFixture) as FixtureData;
-    course = courseFromFixture(preparedFixture);
-    activeFixtureName = preparedFixture.place;
+    const record = parsePreparedRecord(storedFixture);
+    course = courseFromFixture(record.fixture);
+    activeFixtureName = record.fixture.place;
     usingPreparedFixture = true;
-  } catch {
+    restoredRecord = record;
+  } catch (reason) {
+    // 黙って初期化はしません。何が読めなかったかを必ず見せます。
     storedFixtureError =
-      "保存した範囲を読み込めません。再準備するかデモへ戻してください。";
+      reason instanceof PreparedRecordError
+        ? `${reason.message}${CLEAR_HINT}`
+        : `保存データを読めませんでした（course）。${reason instanceof Error ? reason.message : ""}${CLEAR_HINT}`;
   }
 }
 
@@ -105,7 +115,11 @@ app.innerHTML = `
           </div>
           <div class="hud-item checkpoint-block">
             <span class="hud-label">通過</span>
-            <strong><span id="checkpoints">0</span><small> / ${course.checkpointFractions.length}</small></strong>
+            <strong><span id="checkpoints">0</span><small> / <span id="checkpoint-total">${course.checkpointFractions.length}</span></small></strong>
+          </div>
+          <div id="via-hud" class="hud-item via-block" hidden>
+            <span class="hud-label">次の経由</span>
+            <strong><span id="next-via">1</span><small> / <span id="via-total">0</span></small></strong>
           </div>
         </div>
 
@@ -299,8 +313,24 @@ app.innerHTML = `
         </div>
         <p id="range-area" class="range-area"></p>
         <p id="range-error" class="range-error" role="alert" hidden></p>
+        <div id="via-panel" class="via-panel" hidden>
+          <div class="via-heading">
+            <strong>経由する交差点</strong>
+            <span id="via-status"></span>
+          </div>
+          <ol id="via-list" class="via-list"></ol>
+          <div class="via-actions">
+            <button id="via-undo" type="button">ひとつ戻す</button>
+            <button id="via-clear" type="button">クリア</button>
+            <button id="auto-confirm" type="button">自動でコース確定</button>
+            <button id="via-confirm" class="primary" type="button">
+              経由でコース確定
+            </button>
+          </div>
+        </div>
         <div class="range-actions">
           <button id="refresh-map" type="button">地図を更新</button>
+          <button id="clear-record" type="button">保存データを消す</button>
           <button id="use-demo" type="button">宮坂デモへ戻す</button>
           <button id="prepare-range" class="primary" type="button">準備する</button>
         </div>
@@ -329,6 +359,10 @@ const timer = element<HTMLElement>("#timer");
 const speed = element<HTMLElement>("#speed");
 const speedMax = element<HTMLElement>("#speed-max");
 const checkpoints = element<HTMLElement>("#checkpoints");
+const checkpointTotal = element<HTMLElement>("#checkpoint-total");
+const viaHud = element<HTMLElement>("#via-hud");
+const nextVia = element<HTMLElement>("#next-via");
+const viaTotal = element<HTMLElement>("#via-total");
 const progressLabel = element<HTMLElement>("#progress-label");
 const progressBar = element<HTMLElement>("#progress-bar");
 const status = element<HTMLElement>("#status");
@@ -509,6 +543,8 @@ const activateCourse = (
     : "固定街区データ・通信なし";
   courseName.textContent = activeFixtureName;
   courseDistance.textContent = String(Math.round(course.lapLength));
+  checkpointTotal.textContent = String(course.checkpointFractions.length);
+  viaTotal.textContent = String(course.viaPoints.length);
   courseBbox.textContent = course.bboxLabel;
   buildingCount.textContent = String(course.buildings.length);
 };
@@ -715,6 +751,18 @@ const updateInterface = (): void => {
   canvas.dataset.boostedMaxSpeed = boostedSpeedCap(selectedVehicleId).toFixed(4);
   canvas.dataset.boostDurationMs = String(BOOST_DURATION_MS);
 
+  const viaNumber = nextViaNumber(course, race.checkpointsPassed);
+  viaHud.hidden = building || viaNumber === null;
+  if (viaNumber !== null) {
+    nextVia.textContent = String(viaNumber);
+    viaTotal.textContent = String(course.viaPoints.length);
+    viaHud.dataset.text = `次の経由: ${viaNumber} / ${course.viaPoints.length}`;
+    viaHud.setAttribute(
+      "aria-label",
+      `次の経由 ${viaNumber} / ${course.viaPoints.length}`,
+    );
+  }
+
   timer.textContent = formatTime(race.elapsedMs);
   speed.textContent = String(Math.round(Math.abs(race.vehicle.speed) * 3.6));
   checkpoints.textContent = String(race.checkpointsPassed);
@@ -733,6 +781,12 @@ const updateInterface = (): void => {
   debugBadge.hidden = !debug;
   viewBadge.textContent =
     viewMode === "chase" ? "追従カメラ" : "俯瞰表示";
+  canvas.dataset.viaCount = String(course.viaPoints.length);
+  canvas.dataset.nextVia = viaNumber === null ? "" : String(viaNumber);
+  canvas.dataset.checkpointTotal = String(
+    course.checkpointFractions.length,
+  );
+  canvas.dataset.lapLength = course.lapLength.toFixed(2);
   canvas.dataset.raceKind = race.kind;
   canvas.dataset.elapsedMs = race.elapsedMs.toFixed(1);
   canvas.dataset.restartCount = String(restartCount);
@@ -823,6 +877,7 @@ const frame = (now: number): void => {
 
 setupRangePreparation({
   initialError: storedFixtureError,
+  restored: restoredRecord,
   onPrepared: (fixture) => {
     activateCourse(
       courseFromFixture(fixture),

@@ -730,20 +730,29 @@ dd {
   border: 1px solid #35483e;
   border-radius: 13px;
   background: #1a2923;
+  /* 一本指のドラッグで枠を動かすので、ブラウザの既定動作は止めます。 */
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.range-scene {
+  position: absolute;
+  inset: 0;
 }
 
 .range-tiles {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(2, 1fr);
 }
 
+/* タイルは等倍で並べます。引き伸ばすと地図と枠がずれるためです。 */
 .range-tiles img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  pointer-events: none;
+  -webkit-user-drag: none;
 }
 
 .range-box {
@@ -754,6 +763,134 @@ dd {
   background: rgba(45, 146, 211, 0.13);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
   pointer-events: none;
+}
+
+.range-vias {
+  position: absolute;
+  inset: 0;
+}
+
+.via-marker {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(245, 196, 81, 0.75);
+  border-radius: 50%;
+  color: #17231f;
+  background: rgba(17, 29, 24, 0.55);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.via-marker::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #f5c451;
+  box-shadow: 0 0 0 2px rgba(10, 18, 14, 0.7);
+}
+
+.via-marker.chosen {
+  color: #17231f;
+  background: #f5c451;
+  border-color: #fff1ba;
+}
+
+.via-marker.chosen::before {
+  content: none;
+}
+
+.via-panel {
+  margin-top: 13px;
+  padding: 12px;
+  border: 1px solid #3a4d42;
+  border-radius: 12px;
+  background: #16241e;
+}
+
+.via-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+}
+
+.via-heading span {
+  color: #82968a;
+}
+
+.via-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.via-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid #40564a;
+  border-radius: 999px;
+  color: #cfdcd3;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.via-list li span {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #17231f;
+  background: #f5c451;
+  font-weight: 800;
+}
+
+.via-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.via-actions button {
+  min-height: 40px;
+  padding: 10px 13px;
+  border: 1px solid #405248;
+  border-radius: 9px;
+  color: #b8c7be;
+  background: #17251f;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.via-actions button.primary {
+  border-color: #f5c451;
+  color: #17231f;
+  background: #f5c451;
+}
+
+.via-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .range-attribution {

@@ -63,6 +63,8 @@ export const driveLap = (
     if (sample) {
       samples.push({
         elapsedMs: state.elapsedMs,
+        checkpointsPassed: state.checkpointsPassed,
+        progress: state.progress,
         speed: state.vehicle.speed,
         boostRemainingMs: state.boostRemainingMs,
         boostPadId: state.boostPadId,

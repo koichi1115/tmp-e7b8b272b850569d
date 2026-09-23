@@ -57,6 +57,8 @@ export type FixtureData = Readonly<{
     checkpointFractions: readonly number[];
     lapLengthMeters: number;
     lapNodeIds: readonly number[];
+    /** 経由指定で作ったコースだけが持つ、通る順の交差点。 */
+    viaNodeIds?: readonly number[];
   }>;
   roads: readonly FixtureRoad[];
   buildings: readonly FixtureBuilding[];

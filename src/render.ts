@@ -1,5 +1,7 @@
 import { padFootprint } from "./boost-pads.ts";
 import {
+  checkpointLabel,
+  nextViaNumber,
   pointAtProgress,
   type Course,
   type Vec2,
@@ -305,7 +307,11 @@ const drawCheckpoints = (
     context.font = `700 ${Math.max(9, radius * 1.1)}px ui-monospace, monospace`;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(String(index + 1), point.x, point.y + 0.5);
+    context.fillText(
+      checkpointLabel(course, index),
+      point.x,
+      point.y + 0.5,
+    );
   });
 };
 
@@ -458,6 +464,9 @@ export const renderRace = (
     selectedVehicle,
     viewport.width,
     viewport.height,
-    scene,
+    {
+      ...scene,
+      nextViaNumber: nextViaNumber(course, state.checkpointsPassed),
+    },
   );
 };

@@ -5,7 +5,12 @@ import {
   type BoostPad,
 } from "./boost-pads.ts";
 import type { Walker } from "./build-mode.ts";
-import { pointAtProgress, type Course, type Vec2 } from "./course.ts";
+import {
+  checkpointLabel,
+  pointAtProgress,
+  type Course,
+  type Vec2,
+} from "./course.ts";
 import type { RaceState } from "./race.ts";
 import {
   isRoadPassable,
@@ -597,7 +602,11 @@ const drawCourseMarks = (
     context.font = `700 ${Math.max(8, radius)}px ui-monospace, monospace`;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(String(index + 1), projected.x, projected.y);
+    context.fillText(
+      checkpointLabel(course, index),
+      projected.x,
+      projected.y,
+    );
   });
 };
 
